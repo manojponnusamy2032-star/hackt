@@ -159,7 +159,7 @@ def analyze():
     if "reference" in request.files and request.files["reference"].filename:
         ref_file = request.files["reference"]
         try:
-            y_ref = load_mono_16k(ref_file.read(), ref_file.filename)
+            y_ref = load_mono_16k(ref_file.read(), ref_file.filename or "reference.wav")
             speaker = verify_speakers(y, y_ref)
             speaker["claimed_identity"] = claimed
         except Exception as exc:
