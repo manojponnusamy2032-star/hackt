@@ -42,8 +42,9 @@ export function ResourceFooter() {
   return <footer className="resource-footer"><div className="resource-footer-inner"><Brand /><p>Detect the Fake. Verify the Identity. Prevent the Threat.</p><nav aria-label="Legal and product links">{footerLinks.map((link) => <a href={link.href} key={link.href}>{link.label}</a>)}</nav><small>© 2026 NEXORA · Hackathon prototype</small></div></footer>;
 }
 
-export function DashboardResourceLinks() {
-  return <footer className="dashboard-footer"><div className="dashboard-footer-inner"><a className="dashboard-footer-brand" href="/dashboard" aria-label="VoiceGuard dashboard"><span><AudioLines size={16} /></span><b>voiceguard</b></a><div className="dashboard-footer-meta"><span className="dashboard-footer-status"><i />All engines online</span><span className="dashboard-footer-copyright">© 2026 NEXORA</span></div><nav className="dashboard-footer-links" aria-label="Account and support"><a href="/security"><ShieldCheck size={14} />Security</a><a href="/help"><CircleHelp size={14} />Help</a><a href="/settings/notifications"><Bell size={14} />Settings</a><a href="/profile"><UserRoundCheck size={14} />Profile</a></nav></div></footer>;
+export function DashboardResourceLinks({ backendStatus = 'checking' }) {
+  const statusLabel = backendStatus === 'online' ? 'All engines online' : backendStatus === 'checking' ? 'Checking API' : 'API offline';
+  return <footer className="dashboard-footer"><div className="dashboard-footer-inner"><a className="dashboard-footer-brand" href="/dashboard" aria-label="VoiceGuard dashboard"><span><AudioLines size={16} /></span><b>voiceguard</b></a><div className="dashboard-footer-meta"><span className={`dashboard-footer-status ${backendStatus}`}><i />{statusLabel}</span><span className="dashboard-footer-copyright">© 2026 NEXORA</span></div><nav className="dashboard-footer-links" aria-label="Account and support"><a href="/security"><ShieldCheck size={14} />Security</a><a href="/help"><CircleHelp size={14} />Help</a><a href="/settings/notifications"><Bell size={14} />Settings</a><a href="/profile"><UserRoundCheck size={14} />Profile</a></nav></div></footer>;
 }
 
 function PageFrame({ children, minimal = false, className = '' }) {
