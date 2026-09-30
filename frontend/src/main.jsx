@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowUpRight, AudioLines, Check, ChevronDown, FileAudio, LayoutDashboard, LockKeyhole, Menu, Mic, MoreHorizontal, Play, Radio, ShieldCheck, SlidersHorizontal, Upload, UserRoundCheck, X } from 'lucide-react';
 import { API_BASE, analyzeAudio, getHealth } from './api.js';
 import './styles.css';
+import { supabase, supabaseConfigured } from './supabase';
+const SupportPage = lazy(() => import('./support-pages.jsx'));
+const DashboardResourceLinks = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.DashboardResourceLinks })));
+const ResourceFooter = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.ResourceFooter })));
 
 const API_URL = API_BASE;
 
@@ -14,8 +18,26 @@ const navItems = [
   { label: 'Speaker registry', icon: UserRoundCheck },
 ];
 
-function Metric({ label, value, note, tone, icon: Icon }) {
-  return <article className={`metric metric-${tone}`}><div className="metric-top"><span>{label}</span><Icon size={17} strokeWidth={1.8} /></div><strong>{value}</strong><div className="metric-note"><span className="trend-dot" />{note}</div></article>;
+const initialSpeakers = [
+  { name: 'Maya Chen', role: 'Executive leadership', department: 'Executive', samples: 14, updated: 'Sep 28, 2026', status: 'Verified', initials: 'MC' },
+  { name: 'Jordan Lee', role: 'Support operations', department: 'Customer support', samples: 9, updated: 'Sep 25, 2026', status: 'Verified', initials: 'JL' },
+  { name: 'Priya Nair', role: 'Finance director', department: 'Finance', samples: 11, updated: 'Sep 22, 2026', status: 'Verified', initials: 'PN' },
+  { name: 'Evan Brooks', role: 'IT administrator', department: 'Information technology', samples: 7, updated: 'Sep 18, 2026', status: 'Review due', initials: 'EB' },
+];
+
+function LiveMonitorPage() {
+  const [paused, setPaused] = useState(false);
+  const [callState, setCallState] = useState('Elevated risk detected');
+  const callEnded = callState === 'Call ended';
+  return <>
+    <section className="page-heading"><div><p className="eyebrow">REAL-TIME PROTECTION</p><h1>Live monitor</h1><p className="heading-copy">Watch active voice interactions as they happen.</p></div><button className="outline-button" onClick={() => setPaused((value) => !value)}>{paused ? <Play size={16} /> : <Pause size={16} />}{paused ? 'Resume monitoring' : 'Pause monitoring'}</button></section>
+    <section className="metrics-grid"><Metric label="Active channels" value={paused ? '0' : '12'} note={paused ? 'Monitoring paused' : 'Across 4 workspaces'} tone="blue" icon={Radio} /><Metric label="Calls screened" value="186" note="Since 9:00 AM" tone="green" icon={AudioLines} /><Metric label="Flagged this hour" value="3" note="1 requires action" tone="red" icon={AlertTriangle} /><Metric label="Average latency" value="142 ms" note="Within 200 ms target" tone="amber" icon={Activity} /></section>
+    <section className="monitor-grid">
+      <article className="panel live-session-panel"><div className="panel-header"><div><span className="section-kicker">ACTIVE INTERACTION</span><h2>Inbound call · Channel 04</h2></div><span className={`live-status ${paused || callEnded ? 'paused' : ''}`}><i />{callEnded ? 'Ended' : paused ? 'Paused' : 'Live'}</span></div><div className="session-meta"><span>Started 09:41:52</span><span>Caller · +1 (415) ***-0182</span><span>Gateway · SIP-West-02</span></div><div className={`waveform ${paused || callEnded ? 'waveform-paused' : ''}`} aria-label="Live audio waveform">{Array.from({ length: 48 }, (_, index) => <i key={index} style={{ '--bar-height': `${18 + ((index * 37 + 19) % 68)}%`, '--bar-delay': `${(index % 12) * -0.11}s` }} />)}</div><div className="waveform-caption"><span>00:18</span><span>Incoming audio · encrypted</span><span>{callEnded ? 'ENDED' : paused ? 'PAUSED' : 'LIVE'}</span></div><div className="session-footer"><div><span className="section-kicker">TRANSCRIPTION</span><p>“I’m calling about the urgent wire transfer approval...”</p></div><span className="transcript-confidence">96% confidence</span></div></article>
+      <article className="panel live-risk-panel"><div className="panel-header"><div><span className="section-kicker">AUTHENTICITY CHECK</span><h2>{callState}</h2></div><AlertTriangle size={19} className="status-alert" /></div><div className="live-risk-score"><strong>92</strong><span>HIGH RISK · 0.8s ago</span></div><ScoreBar label="Synthetic probability" value={92} color="#d94c72" /><ScoreBar label="Speaker match" value={18} color="#c68b2f" /><div className="risk-callout"><b>{callEnded ? 'Interaction closed' : 'Unknown speaker'}</b><span>{callEnded ? 'This interaction has been ended.' : callState === 'Verification requested' ? 'A step-up verification request has been sent to the caller.' : 'Voice does not match any registered identity. Recommend step-up verification.'}</span></div><div className="session-actions"><button className="primary-button" onClick={() => setCallState('Verification requested')} disabled={callEnded || callState === 'Verification requested'}><ShieldCheck size={16} />{callState === 'Verification requested' ? 'Verification requested' : 'Request verification'}</button><button className="record-button" onClick={() => setCallState('Call ended')} disabled={callEnded}><X size={16} />{callEnded ? 'Call ended' : 'End call'}</button></div></article>
+    </section>
+    <section className="panel monitor-queue"><div className="panel-header"><div><span className="section-kicker">CHANNEL ACTIVITY</span><h2>Monitoring queue</h2></div><button className="text-button">All channels <ChevronDown size={15} /></button></div><div className="table-scroll"><table><thead><tr><th>CHANNEL</th><th>INTERACTION</th><th>SPEAKER</th><th>RISK</th><th>STATUS</th></tr></thead><tbody><tr><td><span className="channel-mark live-mark"><Radio size={14} />04</span></td><td><b>Inbound call</b><small>+1 (415) ***-0182 · 00:18</small></td><td>Unrecognized</td><td><span className="risk-pill high">92 / 100</span></td><td><span className="state-text alert-state">Action needed</span></td></tr><tr><td><span className="channel-mark"><Radio size={14} />02</span></td><td><b>Support callback</b><small>+1 (800) ***-4062 · 03:42</small></td><td>Jordan Lee</td><td><span className="risk-pill low">08 / 100</span></td><td><span className="state-text">Verified</span></td></tr><tr><td><span className="channel-mark"><Radio size={14} />09</span></td><td><b>Executive line</b><small>WebRTC · 01:16</small></td><td>Maya Chen</td><td><span className="risk-pill low">05 / 100</span></td><td><span className="state-text">Verified</span></td></tr></tbody></table></div></section>
+  </>;
 }
 function ScoreBar({ label, value, color }) {
   const v = Math.max(0, Math.min(100, Math.round(value)));
@@ -135,6 +157,17 @@ function App() {
         <footer><span>VoiceGuard AI - NEXORA · Flask {API_URL}</span><span>Detection models v2.4.1</span></footer>
       </div>
     </main>
+    <ResourceFooter />
   </div>;
 }
-createRoot(document.getElementById('root')).render(<App />);
+
+const currentPath = window.location.pathname.replace(/\/$/, '') || '/';
+const currentPage = currentPath === '/console' || currentPath === '/login'
+  ? <><LoginPage /><ResourceFooter /></>
+  : currentPath === '/dashboard'
+    ? <DashboardPage />
+    : currentPath === '/'
+        ? <App />
+      : <SupportPage path={currentPath} />;
+
+createRoot(document.getElementById('root')).render(<Suspense fallback={<div className="dashboard-loading">Loading VoiceGuard...</div>}>{currentPage}</Suspense>);
