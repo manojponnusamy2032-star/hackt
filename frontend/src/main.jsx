@@ -1,113 +1,21 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Activity, AlertTriangle, ArrowRight, AudioLines, Check, ChevronDown, Eye, EyeOff, Gauge, LockKeyhole, LogOut, Menu, Play, ShieldCheck, Sparkles, Upload, UserRoundCheck, X } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowUpRight, AudioLines, Check, ChevronDown, FileAudio, LayoutDashboard, LockKeyhole, Menu, Mic, MoreHorizontal, Play, Radio, ShieldCheck, SlidersHorizontal, Upload, UserRoundCheck, X } from 'lucide-react';
+import { API_BASE, analyzeAudio, getHealth } from './api.js';
 import './styles.css';
 import { supabase, supabaseConfigured } from './supabase';
 const SupportPage = lazy(() => import('./support-pages.jsx'));
 const DashboardResourceLinks = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.DashboardResourceLinks })));
 const ResourceFooter = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.ResourceFooter })));
 
-const steps = [
-  { number: '01', title: 'Detect', copy: 'AASIST models inspect every sample for synthetic patterns hidden beneath natural speech.' },
-  { number: '02', title: 'Verify', copy: 'Compare the voice against a trusted speaker profile before access or action is granted.' },
-  { number: '03', title: 'Prevent', copy: 'Turn a risk signal into a clear decision: allow, verify, flag, or block.' },
-];
+const API_URL = API_BASE;
 
-function LoginPage() {
-  const [showPassword, setShowPassword] = useState(false);
-  const [mode, setMode] = useState('login');
-  const [status, setStatus] = useState({ type: '', message: '' });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  useEffect(() => {
-    const handleSupportHash = () => {
-      const routes = { '#forgot': '/forgot-password', '#terms': '/terms', '#privacy': '/privacy' };
-      const route = routes[window.location.hash];
-      if (route) window.location.replace(route);
-    };
-    handleSupportHash();
-    window.addEventListener('hashchange', handleSupportHash);
-    return () => window.removeEventListener('hashchange', handleSupportHash);
-  }, []);
-  const submitLogin = async (event) => {
-    event.preventDefault();
-    setStatus({ type: '', message: '' });
-    if (!supabaseConfigured) { setStatus({ type: 'error', message: 'Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to frontend/.env.' }); return; }
-    setIsSubmitting(true);
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin + '/console' } });
-    setIsSubmitting(false);
-    if (result.error) { setStatus({ type: 'error', message: result.error.message }); return; }
-    if (mode === 'login' && result.data.session) { window.location.replace('/dashboard'); return; }
-    setStatus({ type: 'success', message: 'Account created. Check your email to confirm your account.' });
-  };
-  return <div className="login-shell">
-    <div className="login-art"><a className="landing-brand" href="/"><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong></span></a><div className="login-art-copy"><span className="eyebrow">SECURITY OPERATIONS</span><h1>Keep trust<br /><em>in the conversation.</em></h1><p>One secure workspace for every signal, speaker, and decision.</p><div className="login-signal"><div className="login-signal-head"><span><i /> Live protection</span><b>ACTIVE</b></div><Waveform /></div></div><span className="login-art-footer">AI-powered voice security · NEXORA</span></div>
-    <main className="login-panel"><a className="back-home" href="/"><ArrowRight size={14} /> Back to website</a><div className="login-card"><div className="login-icon"><LockKeyhole size={20} /></div><span className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'GET STARTED'}</span><h2>{mode === 'login' ? 'Sign in to VoiceGuard' : 'Create your account'}</h2><p className="login-copy">{mode === 'login' ? 'Access your security console and keep every high-trust interaction protected.' : 'Set up your secure workspace and start protecting high-trust interactions.'}</p>{status.message && <div className={`login-notice ${status.type}`}>{status.message}</div>}<form onSubmit={submitLogin}><label>Email address<input type="email" placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label>Password<span className="password-field"><input type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={6} required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>{mode === 'login' && <div className="login-options"><label className="remember"><input type="checkbox" /> <span>Remember me</span></label><a href="#forgot">Forgot password?</a></div>}<button className="login-button" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'} {!isSubmitting && <ArrowRight size={16} />}</button></form>{mode === 'login' && <><div className="login-divider"><span>or continue with</span></div><button className="sso-button" type="button" onClick={() => setStatus({ type: 'error', message: 'Google sign-in needs to be enabled in your Supabase dashboard.' })}><span className="sso-mark">G</span> Continue with Google</button></>}<p className="login-help">{mode === 'login' ? 'New to VoiceGuard?' : 'Already have an account?'} <button className="mode-toggle" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setStatus({ type: '', message: '' }); }}>{mode === 'login' ? 'Create an account' : 'Sign in'}</button></p></div><p className="login-legal">By continuing, you agree to VoiceGuard's Terms and Privacy Policy.</p></main>
-  </div>;
-}
-
-function DashboardWorkspace({ session, signOut }) {
-  const [activeTab, setActiveTab] = useState('Overview');
-  const [paused, setPaused] = useState(false);
-  const [query, setQuery] = useState('');
-  const tabs = [
-    { label: 'Overview', icon: Gauge },
-    { label: 'Live monitor', icon: Activity },
-    { label: 'Analysis history', icon: AudioLines },
-    { label: 'Speaker registry', icon: UserRoundCheck },
-  ];
-  const history = [
-    ['09:42:18', 'unknown_caller_042.wav', 'Synthetic voice', '92 / 100'],
-    ['09:31:04', 'maya_chen_check_018.wav', 'Verified', '08 / 100'],
-    ['09:16:51', 'finance_transfer_18.wav', 'Review required', '67 / 100'],
-    ['08:58:27', 'support_call_771.wav', 'Verified', '12 / 100'],
-  ];
-  const filteredHistory = history.filter((row) => row.join(' ').toLowerCase().includes(query.toLowerCase()));
-  return <div className="dashboard-shell"><header className="dashboard-nav"><a className="landing-brand" href="/"><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong><small>security console</small></span></a><nav className="dashboard-tabs">{tabs.map(({ label, icon: Icon }) => <button className={activeTab === label ? 'dashboard-tab active' : 'dashboard-tab'} key={label} onClick={() => setActiveTab(label)}><Icon size={16} />{label}</button>)}</nav><div className="dashboard-user"><span>{session.user.email}</span><button className="dashboard-signout" onClick={signOut}><LogOut size={15} /> Sign out</button></div></header><main className="dashboard-main"><div className="dashboard-heading"><div><span className="eyebrow">{activeTab === 'Overview' ? 'SECURITY OPERATIONS' : activeTab.toUpperCase()}</span><h1>{activeTab === 'Overview' ? 'Good morning.' : activeTab}</h1><p>{activeTab === 'Overview' ? 'Monitor voice authenticity and protect high-trust interactions.' : `Manage your VoiceGuard ${activeTab.toLowerCase()} workspace.`}</p></div><span className="dashboard-status"><i /> All engines online</span></div>{activeTab === 'Overview' && <><section className="dashboard-metrics"><article><AlertTriangle size={18} /><span>Risk score</span><strong>72 / 100</strong><small>Needs review</small></article><article><AudioLines size={18} /><span>Samples analyzed</span><strong>1,284</strong><small>18 in the last hour</small></article><article><Gauge size={18} /><span>Threats blocked</span><strong>36</strong><small>3 today</small></article><article><UserRoundCheck size={18} /><span>Speaker accuracy</span><strong>98.4%</strong><small>+0.8% this week</small></article></section><section className="dashboard-grid"><article className="dashboard-card analysis-card"><div className="dashboard-card-title"><div><span className="eyebrow">ANALYSIS CENTER</span><h2>Inspect a voice sample</h2></div><span className="ready-badge"><Check size={13} /> Ready</span></div><p>Upload an audio recording to run the authenticity and speaker verification pipeline.</p><label className="dashboard-dropzone"><input type="file" accept="audio/*" /><Upload size={25} /><strong>Drop an audio file here</strong><small>WAV, MP3, M4A up to 25 MB</small></label><button className="dashboard-action" type="button"><Play size={15} fill="currentColor" /> Run analysis</button></article><article className="dashboard-card result-card"><div className="dashboard-card-title"><div><span className="eyebrow">LATEST RESULT</span><h2>Interaction risk</h2></div><Activity size={20} /></div><div className="dashboard-risk"><div className="dashboard-ring"><strong>72</strong><small>/100</small></div><div><b>HIGH RISK</b><h3>Verification required</h3><p>Potential synthetic voice detected. Do not authorize sensitive actions.</p></div></div><div className="dashboard-bars"><span><i style={{ width: '84%' }} /><b>Synthetic probability <em>84%</em></b></span><span><i style={{ width: '62%' }} /><b>Speaker match <em>62%</em></b></span><span><i style={{ width: '91%' }} /><b>Model confidence <em>91%</em></b></span></div></article></section></>}{activeTab === 'Live monitor' && <section className="dashboard-grid"><article className="dashboard-card analysis-card"><div className="dashboard-card-title"><div><span className="eyebrow">ACTIVE INTERACTION</span><h2>Inbound call · Channel 04</h2></div><span className="ready-badge"><i /> {paused ? 'Paused' : 'Live'}</span></div><p>Caller · +1 (415) ***-0182 · Gateway SIP-West-02</p><div className="monitor-wave"><Waveform /></div><p>“I’m calling about the urgent wire transfer approval...”</p><button className="dashboard-action" type="button" onClick={() => setPaused((value) => !value)}>{paused ? <Play size={15} /> : <PauseIcon />} {paused ? 'Resume monitoring' : 'Pause monitoring'}</button></article><article className="dashboard-card result-card"><div className="dashboard-card-title"><div><span className="eyebrow">AUTHENTICITY CHECK</span><h2>Elevated risk detected</h2></div><AlertTriangle size={20} /></div><div className="dashboard-risk"><div className="dashboard-ring danger"><strong>92</strong><small>/100</small></div><div><b>HIGH RISK</b><h3>Unknown speaker</h3><p>Voice does not match a registered identity. Recommend step-up verification.</p></div></div><button className="dashboard-action" type="button"><ShieldCheck size={15} /> Request verification</button></article></section>}{activeTab === 'Analysis history' && <section className="dashboard-card dashboard-table-card"><div className="dashboard-card-title"><div><span className="eyebrow">VOICE INTELLIGENCE</span><h2>Recent analyses</h2></div><input className="dashboard-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search samples" /></div><div className="dashboard-table-wrap"><table><thead><tr><th>TIME</th><th>SAMPLE</th><th>OUTCOME</th><th>RISK</th></tr></thead><tbody>{filteredHistory.map((row) => <tr key={row[1]}><td>{row[0]}</td><td><b>{row[1]}</b></td><td><span className="dashboard-outcome">{row[2]}</span></td><td>{row[3]}</td></tr>)}</tbody></table></div></section>}{activeTab === 'Speaker registry' && <section className="dashboard-card dashboard-table-card"><div className="dashboard-card-title"><div><span className="eyebrow">IDENTITY MANAGEMENT</span><h2>Registered speakers</h2></div><button className="dashboard-action compact" type="button"><UserRoundCheck size={15} /> Add speaker</button></div><div className="dashboard-table-wrap"><table><thead><tr><th>SPEAKER</th><th>DEPARTMENT</th><th>VOICE SAMPLES</th><th>STATUS</th></tr></thead><tbody><tr><td><b>Maya Chen</b><small>Executive leadership</small></td><td>Executive</td><td>14 samples</td><td><span className="dashboard-outcome verified">Verified</span></td></tr><tr><td><b>Jordan Lee</b><small>Support operations</small></td><td>Customer support</td><td>9 samples</td><td><span className="dashboard-outcome verified">Verified</span></td></tr><tr><td><b>Evan Brooks</b><small>IT administrator</small></td><td>Information technology</td><td>7 samples</td><td><span className="dashboard-outcome review">Review due</span></td></tr></tbody></table></div></section>}</main></div>;
-}
-
-function PauseIcon() { return <span className="pause-icon">||</span>; }
-
-function DashboardPage() {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [fileName, setFileName] = useState('');
-
-  useEffect(() => {
-    if (!supabaseConfigured) { setLoading(false); return undefined; }
-    let mounted = true;
-    supabase.auth.getSession().then(({ data }) => { if (mounted) { setSession(data.session); setLoading(false); } });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => { mounted = false; listener.subscription.unsubscribe(); };
-  }, []);
-
-  useEffect(() => {
-    if (!loading && !session && supabaseConfigured) window.location.replace('/console');
-  }, [loading, session]);
-
-  const signOut = async () => { await supabase?.auth.signOut(); window.location.replace('/console'); };
-  if (loading) return <div className="dashboard-loading">Loading your secure workspace...</div>;
-  if (!supabaseConfigured) return <div className="dashboard-loading">Configure Supabase to access the dashboard.</div>;
-  if (!session) return null;
-  const email = session.user.email || 'Security analyst';
-  return <div className="dashboard-page-frame"><DashboardWorkspace session={session} signOut={signOut} /><DashboardResourceLinks /></div>;
-}
-
-function Waveform() {
-  const bars = [34, 62, 45, 88, 54, 75, 38, 96, 66, 43, 81, 57, 100, 70, 40, 78, 53, 91, 47, 64, 36, 73, 52, 86, 44, 68, 32, 58, 42, 76, 50, 93, 39, 65, 48, 82, 36, 71, 55, 89];
-  return <div className="waveform" aria-label="Voice signal visualization">{bars.map((height, index) => <span key={index} style={{ height: `${height}%`, animationDelay: `${index * 35}ms` }} />)}</div>;
-}
-
-const historyRows = [
-  { time: '09:42:18', file: 'unknown_caller_042.wav', source: 'Inbound call · +1 (415) ***-0182', result: 'Synthetic voice', risk: 92, speaker: 'Unrecognized' },
-  { time: '09:31:04', file: 'maya_chen_check_018.wav', source: 'Executive line · WebRTC', result: 'Verified', risk: 8, speaker: 'Maya Chen' },
-  { time: '09:16:51', file: 'finance_transfer_18.wav', source: 'Finance · +1 (212) ***-7741', result: 'Review required', risk: 67, speaker: 'Possible match' },
-  { time: '08:58:27', file: 'support_call_771.wav', source: 'Support · SIP gateway', result: 'Verified', risk: 12, speaker: 'Jordan Lee' },
-  { time: '08:44:09', file: 'vendor_callback_205.wav', source: 'Procurement · WebRTC', result: 'Synthetic voice', risk: 88, speaker: 'Unrecognized' },
-  { time: '08:21:36', file: 'maya_chen_check_017.wav', source: 'Executive line · WebRTC', result: 'Verified', risk: 5, speaker: 'Maya Chen' },
+const initialEvents = [];
+const navItems = [
+  { label: 'Overview', icon: LayoutDashboard },
+  { label: 'Live monitor', icon: Radio },
+  { label: 'Analysis history', icon: Activity },
+  { label: 'Speaker registry', icon: UserRoundCheck },
 ];
 
 const initialSpeakers = [
@@ -131,65 +39,123 @@ function LiveMonitorPage() {
     <section className="panel monitor-queue"><div className="panel-header"><div><span className="section-kicker">CHANNEL ACTIVITY</span><h2>Monitoring queue</h2></div><button className="text-button">All channels <ChevronDown size={15} /></button></div><div className="table-scroll"><table><thead><tr><th>CHANNEL</th><th>INTERACTION</th><th>SPEAKER</th><th>RISK</th><th>STATUS</th></tr></thead><tbody><tr><td><span className="channel-mark live-mark"><Radio size={14} />04</span></td><td><b>Inbound call</b><small>+1 (415) ***-0182 · 00:18</small></td><td>Unrecognized</td><td><span className="risk-pill high">92 / 100</span></td><td><span className="state-text alert-state">Action needed</span></td></tr><tr><td><span className="channel-mark"><Radio size={14} />02</span></td><td><b>Support callback</b><small>+1 (800) ***-4062 · 03:42</small></td><td>Jordan Lee</td><td><span className="risk-pill low">08 / 100</span></td><td><span className="state-text">Verified</span></td></tr><tr><td><span className="channel-mark"><Radio size={14} />09</span></td><td><b>Executive line</b><small>WebRTC · 01:16</small></td><td>Maya Chen</td><td><span className="risk-pill low">05 / 100</span></td><td><span className="state-text">Verified</span></td></tr></tbody></table></div></section>
   </>;
 }
-
-function AnalysisHistoryPage() {
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('All outcomes');
-  const rows = historyRows.filter((row) => (filter === 'All outcomes' || row.result === filter) && `${row.file} ${row.source} ${row.speaker}`.toLowerCase().includes(query.toLowerCase()));
-  return <>
-    <section className="page-heading"><div><p className="eyebrow">VOICE INTELLIGENCE</p><h1>Analysis history</h1><p className="heading-copy">Review detection results and verification activity.</p></div><button className="outline-button"><ArrowUpRight size={16} />Export history</button></section>
-    <section className="metrics-grid"><Metric label="Total analyses" value="1,284" note="18 in the last hour" tone="blue" icon={AudioLines} /><Metric label="Synthetic detected" value="36" note="2.8% of all samples" tone="red" icon={AlertTriangle} /><Metric label="Verified speakers" value="1,196" note="93.1% matched" tone="green" icon={UserRoundCheck} /><Metric label="Needs review" value="14" note="5 added today" tone="amber" icon={Activity} /></section>
-    <section className="panel history-panel"><div className="panel-header"><div><span className="section-kicker">ALL SAMPLES</span><h2>Recent analyses <span className="result-count">{rows.length}</span></h2></div><button className="text-button"><SlidersHorizontal size={15} />Advanced filters</button></div><div className="table-tools"><label className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search samples, callers, speakers" /></label><select aria-label="Filter by outcome" value={filter} onChange={(event) => setFilter(event.target.value)}><option>All outcomes</option><option>Synthetic voice</option><option>Verified</option><option>Review required</option></select><button className="date-filter"><span>Sep 30, 2026</span><ChevronDown size={15} /></button></div><div className="table-scroll"><table><thead><tr><th>TIME</th><th>SAMPLE</th><th>OUTCOME</th><th>RISK SCORE</th><th>SPEAKER</th><th></th></tr></thead><tbody>{rows.map((row) => <tr key={row.file}><td className="mono-cell">{row.time}</td><td><b>{row.file}</b><small>{row.source}</small></td><td><span className={`outcome-pill ${row.result === 'Verified' ? 'verified' : row.result === 'Review required' ? 'review' : 'synthetic'}`}><i />{row.result}</span></td><td><span className={`risk-number ${row.risk > 70 ? 'high-number' : row.risk > 40 ? 'mid-number' : ''}`}>{row.risk}<small> / 100</small></span></td><td>{row.speaker}</td><td><button className="row-action" aria-label={`Open ${row.file}`}><ArrowUpRight size={16} /></button></td></tr>)}</tbody></table>{rows.length === 0 && <div className="empty-state">No analyses match your search.</div>}</div><div className="table-pagination"><span>Showing {rows.length} of 1,284 analyses</span><div><button disabled>Previous</button><button>Next <ArrowUpRight size={13} /></button></div></div></section>
-  </>;
+function ScoreBar({ label, value, color }) {
+  const v = Math.max(0, Math.min(100, Math.round(value)));
+  return <div className="score-row"><div className="score-label"><span>{label}</span><b>{v}%</b></div><div className="score-track"><span style={{ width: `${v}%`, background: color }} /></div></div>;
 }
-
-function SpeakerRegistryPage() {
-  const [speakers, setSpeakers] = useState(initialSpeakers);
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('All statuses');
-  const [adding, setAdding] = useState(false);
-  const filteredSpeakers = speakers.filter((speaker) => (status === 'All statuses' || speaker.status === status) && `${speaker.name} ${speaker.role} ${speaker.department}`.toLowerCase().includes(query.toLowerCase()));
-  const addSpeaker = (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const name = form.get('name').trim();
-    const department = form.get('department').trim();
-    if (!name || !department) return;
-    const initials = name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-    setSpeakers((current) => [{ name, department, role: `${department} team`, samples: 0, updated: 'Just added', status: 'Enrollment needed', initials }, ...current]);
-    setAdding(false);
-  };
-  return <>
-    <section className="page-heading"><div><p className="eyebrow">IDENTITY MANAGEMENT</p><h1>Speaker registry</h1><p className="heading-copy">Manage trusted voice profiles used for speaker verification.</p></div><button className="primary-button" onClick={() => setAdding((value) => !value)}><Plus size={16} />Add speaker</button></section>
-    <section className="metrics-grid"><Metric label="Registered speakers" value={`${speakers.length.toString().padStart(2, '0')}`} note="Across 6 departments" tone="blue" icon={UserRoundCheck} /><Metric label="Verified profiles" value={`${speakers.filter((speaker) => speaker.status === 'Verified').length}`} note="Voiceprints active" tone="green" icon={ShieldCheck} /><Metric label="Enrollment needed" value={`${speakers.filter((speaker) => speaker.status !== 'Verified').length}`} note="Complete voice samples" tone="amber" icon={Mic} /><Metric label="Registry accuracy" value="98.4%" note="Updated Sep 30" tone="red" icon={Activity} /></section>
-    {adding && <section className="panel add-speaker-panel"><div className="panel-header"><div><span className="section-kicker">NEW VOICE PROFILE</span><h2>Add a trusted speaker</h2></div><button className="row-action" onClick={() => setAdding(false)} aria-label="Close form"><X size={17} /></button></div><form className="speaker-form" onSubmit={addSpeaker}><label>Full name<input name="name" placeholder="e.g. Taylor Morgan" required /></label><label>Department<input name="department" placeholder="e.g. Legal" required /></label><div><button className="primary-button" type="submit"><Plus size={15} />Create profile</button><button className="text-button" type="button" onClick={() => setAdding(false)}>Cancel</button></div></form></section>}
-    <section className="panel registry-panel"><div className="panel-header"><div><span className="section-kicker">TRUSTED IDENTITIES</span><h2>Registered speakers <span className="result-count">{speakers.length}</span></h2></div><button className="text-button"><SlidersHorizontal size={15} />Manage fields</button></div><div className="table-tools"><label className="search-field"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or department" /></label><select aria-label="Filter by verification status" value={status} onChange={(event) => setStatus(event.target.value)}><option>All statuses</option><option>Verified</option><option>Enrollment needed</option><option>Review due</option></select></div><div className="table-scroll"><table><thead><tr><th>SPEAKER</th><th>DEPARTMENT</th><th>VOICE SAMPLES</th><th>LAST UPDATED</th><th>STATUS</th><th></th></tr></thead><tbody>{filteredSpeakers.map((speaker) => <tr key={speaker.name}><td><div className="speaker-cell"><span className="speaker-avatar">{speaker.initials}</span><span><b>{speaker.name}</b><small>{speaker.role}</small></span></div></td><td>{speaker.department}</td><td><span className="sample-count">{speaker.samples} <small>samples</small></span></td><td>{speaker.updated}</td><td><span className={`outcome-pill ${speaker.status === 'Verified' ? 'verified' : 'review'}`}><i />{speaker.status}</span></td><td><button className="row-action" aria-label={`Open ${speaker.name} profile`}><MoreHorizontal size={17} /></button></td></tr>)}</tbody></table>{filteredSpeakers.length === 0 && <div className="empty-state">No speakers match your search.</div>}</div><div className="table-pagination"><span>Showing {filteredSpeakers.length} of {speakers.length} speakers</span><div><button disabled>Previous</button><button>Next <ArrowUpRight size={13} /></button></div></div></section>
-  </>;
+function riskTone(level) {
+  if (level === 'CRITICAL') return 'red';
+  if (level === 'HIGH') return 'red';
+  if (level === 'MEDIUM') return 'amber';
+  return 'green';
+}
+function eventLevel(level) {
+  const l = (level || '').toUpperCase();
+  if (l === 'CRITICAL' || l === 'HIGH') return 'high';
+  if (l === 'MEDIUM') return 'medium';
+  return 'low';
 }
 
 function App() {
+  const [activeNav, setActiveNav] = useState('Overview');
+  const [file, setFile] = useState(null);
+  const [refFile, setRefFile] = useState(null);
+  const [claimed, setClaimed] = useState('unknown');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [lastAnalysis, setLastAnalysis] = useState('not yet analyzed');
+  const [events, setEvents] = useState(initialEvents);
   const [menuOpen, setMenuOpen] = useState(false);
-  const closeMenu = () => setMenuOpen(false);
+  const [backend, setBackend] = useState({ state: 'checking', info: null });
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [metrics, setMetrics] = useState({ samples: 0, blocked: 0 });
+  const mediaRef = useRef(null);
+  const chunksRef = useRef([]);
+
   useEffect(() => {
-    document.querySelectorAll('a[href="http://localhost:5173/console"]').forEach((link) => link.setAttribute('href', '/console'));
+    let alive = true;
+    getHealth().then((info) => { if (alive) setBackend({ state: 'online', info }); }).catch(() => { if (alive) setBackend({ state: 'offline', info: null }); });
+    return () => { alive = false; };
   }, []);
-  return <div className="landing-shell">
-    <header className="landing-nav">
-      <a className="landing-brand" href="#top" onClick={closeMenu}><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong></span></a>
-      <button className="landing-menu" aria-label="Toggle navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button>
-      <nav className={menuOpen ? 'landing-links open' : 'landing-links'}><a href="#platform" onClick={closeMenu}>Platform</a><a href="#how-it-works" onClick={closeMenu}>How it works</a><a href="#security" onClick={closeMenu}>Security</a><a className="nav-login" href="http://localhost:5173/console">Sign in <ArrowRight size={14} /></a></nav>
-    </header>
 
-    <main id="top">
-      <section className="hero-section"><div className="hero-copy"><div className="eyebrow-pill"><span />REAL-TIME VOICE SECURITY</div><h1>Trust the voice.<br /><em>Verify the signal.</em></h1><p className="hero-description">VoiceGuard protects high-trust conversations from AI impersonation with deepfake detection, speaker verification, and decisions your team can act on.</p><div className="hero-actions"><a className="hero-button" href="http://localhost:5173/console">Open security console <ArrowRight size={17} /></a><a className="demo-link" href="#how-it-works"><span className="play-icon"><Play size={12} fill="currentColor" /></span>See how it works</a></div><div className="hero-trust"><ShieldCheck size={17} /><span>Built for security teams handling sensitive conversations</span></div></div><div className="hero-visual"><div className="visual-glow" /><div className="signal-card"><div className="signal-top"><div><span className="signal-label">LIVE SIGNAL ANALYSIS</span><strong>Voice authenticity</strong></div><span className="live-status"><i /> Monitoring</span></div><div className="signal-display"><div className="signal-grid" /><Waveform /><div className="signal-line" /></div><div className="signal-footer"><span><AudioLines size={14} /> incoming_call_042.wav</span><b><Check size={13} /> protected</b></div></div><div className="floating-score"><span>RISK SCORE</span><strong>08</strong><small>Low risk</small><div className="score-mini"><i /></div></div><div className="floating-chip chip-one"><Check size={13} /> Speaker verified</div><div className="floating-chip chip-two"><Sparkles size={13} /> AI scan complete</div></div></section>
+  const handleFile = (event) => { const nextFile = event.target.files?.[0]; if (nextFile) { setFile(nextFile); setError(''); } };
+  const handleRef = (event) => { const nextFile = event.target.files?.[0]; if (nextFile) setRefFile(nextFile); };
 
-      <section className="stats-strip"><div><strong>98.4%</strong><span>speaker accuracy</span></div><div><strong>1.2M+</strong><span>voice samples analyzed</span></div><div><strong>24 / 7</strong><span>continuous protection</span></div><div><strong>0.4 sec</strong><span>average response time</span></div></section>
+  const analyze = async () => {
+    if (isAnalyzing || !file) { if (!file) setError('Choose an audio file (or record live) before running analysis.'); return; }
+    setIsAnalyzing(true); setError('');
+    try {
+      const data = await analyzeAudio({ audioFile: file, referenceFile: refFile, claimedSpeaker: claimed });
+      setResult(data);
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastAnalysis(time);
+      setMetrics((m) => ({ samples: m.samples + 1, blocked: m.blocked + (data?.prevention?.action === 'BLOCK' ? 1 : 0) }));
+      setEvents((current) => [{ time, label: `Voice sample analyzed (${data?.risk?.risk_level || '?'})`, detail: data?.filename || file.name, level: eventLevel(data?.risk?.risk_level) }, ...current].slice(0, 6));
+    } catch (err) {
+      setError(err.message || 'Analysis failed. Is the Flask API running on :5000?');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
-      <section className="platform-section" id="platform"><div className="section-intro"><span className="eyebrow">ONE SIGNAL. THREE LAYERS.</span><h2>Security that listens<br /><em>between the words.</em></h2><p>Identity alone is no longer enough. VoiceGuard combines authenticity, identity, and context to make every conversation safer.</p></div><div className="feature-list"><article><span className="feature-number">01</span><div><h3>Deepfake detection</h3><p>Find the spectral fingerprints of generated speech in real time.</p></div><ArrowRight size={18} /></article><article><span className="feature-number">02</span><div><h3>Speaker verification</h3><p>Make sure the person speaking is who they claim to be.</p></div><ArrowRight size={18} /></article><article><span className="feature-number">03</span><div><h3>Risk-led prevention</h3><p>Convert model output into an action your team can trust.</p></div><ArrowRight size={18} /></article></div></section>
+  const toggleRecord = async () => {
+    if (isRecording) {
+      mediaRef.current?.mediaRecorder?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mr.mimeType || 'audio/webm' });
+        const f = new File([blob], `live_recording_${Date.now()}.webm`, { type: blob.type });
+        setFile(f); setError('');
+        stream.getTracks().forEach((t) => t.stop());
+        setIsRecording(false);
+      };
+      mediaRef.current = { mediaRecorder: mr };
+      mr.start();
+      setIsRecording(true);
+    } catch (e) {
+      setError('Microphone blocked by the browser. Allow mic access and retry.');
+    }
+  };
 
-      <section className="workflow-section" id="how-it-works"><div className="section-intro centered"><span className="eyebrow">HOW IT WORKS</span><h2>From voice input<br /><em>to confident action.</em></h2></div><div className="steps-grid">{steps.map((step) => <article className="step-card" key={step.number}><span>{step.number}</span><h3>{step.title}</h3><p>{step.copy}</p></article>)}</div></section>
+  const risk = result?.risk || null;
+  const det = result?.detection || null;
+  const spk = result?.speaker || null;
+  const prev = result?.prevention || null;
+  const hasResult = !!result;
+  const riskScore = risk ? Math.round(risk.risk_score) : null;
+  const riskLabel = risk?.risk_level ? `${risk.risk_level} RISK` : 'NO RESULT YET';
+  const actionMsg = prev ? `${prev.action} - ${prev.message}` : 'Upload a sample and press Run analysis. Nothing has been scored yet.';
+  const synthPct = det ? det.synthetic_probability * 100 : null;
+  const spkPct = spk ? spk.speaker_match_score * 100 : null;
+  const confPct = det ? det.model_confidence * 100 : null;
 
-      <section className="cta-section" id="security"><div><span className="eyebrow">READY WHEN YOU ARE</span><h2>Make every voice<br /><em>verifiable.</em></h2></div><a className="hero-button" href="http://localhost:5173/console">Enter VoiceGuard <ArrowRight size={17} /></a></section>
+  return <div className="app-shell">
+    <aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}>
+      <div className="brand"><div className="brand-mark"><AudioLines size={21} /></div><div><b>voiceguard</b><span>security console</span></div></div>
+      <div className="workspace-label">WORKSPACE</div>
+      <nav>{navItems.map(({ label, icon: Icon }) => <button className={activeNav === label ? 'nav-item active' : 'nav-item'} key={label} onClick={() => { setActiveNav(label); setMenuOpen(false); }}><Icon size={18} /><span>{label}</span>{label === 'Live monitor' && <i className="live-dot" />}</button>)}</nav>
+      <div className="sidebar-bottom"><button className="nav-item"><SlidersHorizontal size={18} /><span>Settings</span></button><div className="engine-card"><div className="engine-heading"><span className="pulse" />{backend.state === 'online' ? `API online (${result?.deepfake_backend || backend.info?.deepfake_backend || 'ready'})` : backend.state === 'checking' ? 'Checking API...' : 'API offline - start Flask :5000'}</div><p>Last sync <strong>just now</strong> · <strong>{API_URL}</strong></p></div><div className="profile"><div className="avatar">AK</div><div><b>Alex Kim</b><span>Security analyst</span></div><MoreHorizontal size={18} /></div></div>
+    </aside>
+    <main className="main-content">
+      <header className="topbar"><button className="mobile-menu" aria-label="Open navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button><div className="breadcrumbs"><span>Workspace</span><span>/</span><b>{activeNav}</b></div><div className="topbar-actions"><span className="system-status"><span className="pulse" />{backend.state === 'online' ? 'System operational' : 'Backend unreachable'}</span></div></header>
+      <div className="content-wrap">
+        <section className="page-heading"><div><p className="eyebrow">VOICEGUARD · REACT + FLASK</p><h1>Good morning, Alex.</h1><p className="heading-copy">Monitor voice authenticity and protect high-trust interactions.</p></div><button className="outline-button" onClick={() => window.print()}><ArrowUpRight size={17} />Export report</button></section>
+        <section className="metrics-grid"><Metric label="Risk score" value={hasResult ? `${riskScore} / 100` : '-- / 100'} note={risk ? `level ${risk.risk_level}` : 'no analysis yet'} tone={risk ? riskTone(risk.risk_level) : 'blue'} icon={AlertTriangle} /><Metric label="Samples analyzed" value={metrics.samples.toLocaleString()} note={metrics.samples ? 'this session' : 'no analysis yet'} tone="blue" icon={AudioLines} /><Metric label="Threats blocked" value={String(metrics.blocked)} note={metrics.blocked ? 'blocked this session' : 'no blocks yet'} tone="amber" icon={LockKeyhole} /><Metric label="Speaker match" value={spk ? `${(spk.speaker_match_score * 100).toFixed(1)}%` : '--'} note={spk ? (spk.speaker_verified ? 'speaker verified' : 'not verified') : 'no analysis yet'} tone="green" icon={ShieldCheck} /></section>
+        <section className="primary-grid">
+          <article className="panel analysis-panel"><div className="panel-header"><div><span className="section-kicker">ANALYSIS CENTER</span><h2>Inspect a voice sample</h2></div><span className="ready-badge"><Check size={13} /> {backend.state === 'online' ? 'API ready' : 'API offline'}</span></div><p className="panel-copy">Upload a recording or use your microphone to run the full authenticity and speaker verification pipeline.</p><label className={`dropzone ${file ? 'has-file' : ''}`}><input type="file" accept="audio/*" onChange={handleFile} /><div className="upload-icon">{file ? <FileAudio size={25} /> : <Upload size={25} />}</div><strong>{file ? file.name : 'Drop an audio file here'}</strong><span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB - ready to inspect` : 'WAV, MP3, M4A up to 25 MB'}</span>{!file && <em>or browse files</em>}</label><div className="verify-row"><label className="verify-input">Claimed speaker<input type="text" value={claimed} onChange={(e) => setClaimed(e.target.value)} placeholder="e.g. CEO" /></label><label className="verify-input">Reference voice (optional)<input type="file" accept="audio/*" onChange={handleRef} /><span>{refFile ? refFile.name : 'no reference - neutral 0.5 used'}</span></label></div>{error && <p className="error-line">{error}</p>}{result?.deepfake_backend && <p className="backend-line">Scored by <b>{result.deepfake_backend}</b> · {result.duration_s}s audio</p>}<div className="analysis-actions"><button className="primary-button" onClick={analyze} disabled={isAnalyzing || !file}><Play size={16} fill="currentColor" />{isAnalyzing ? 'Analyzing sample...' : 'Run analysis'}</button><button className={`record-button ${isRecording ? 'recording' : ''}`} onClick={toggleRecord} title="Record from microphone"><Mic size={18} /><span>{isRecording ? 'Stop recording' : 'Record live'}</span></button></div><div className="pipeline"><div className="pipeline-step done"><span>01</span><b>Preprocess</b><small>{result ? `${result.duration_s}s @16kHz` : 'Ready'}</small></div><div className="pipeline-line done" /><div className="pipeline-step done"><span>02</span><b>Deepfake scan</b><small>{det ? `${(det.synthetic_probability * 100).toFixed(1)}% synthetic` : 'Ready'}</small></div><div className="pipeline-line" /><div className="pipeline-step"><span>03</span><b>Verify speaker</b><small>{spk && !spk.note ? `${(spk.speaker_match_score * 100).toFixed(1)}% match` : 'Waiting'}</small></div></div></article>
+          <article className="panel score-panel"><div className="panel-header"><div><span className="section-kicker">LATEST RESULT</span><h2>Interaction risk</h2></div><button className="more-button" title="More result options"><MoreHorizontal size={19} /></button></div>{hasResult ? <><div className="risk-summary"><div className="risk-ring"><div><strong>{riskScore}</strong><span>/100</span></div></div><div><span className="risk-label">{riskLabel}</span><h3>{prev?.action || '--'}</h3><p>{actionMsg}</p></div></div><div className="score-bars"><ScoreBar label="Synthetic probability" value={synthPct} color="#ef6b5f" /><ScoreBar label="Speaker match" value={spkPct} color="#e5a93d" /><ScoreBar label="Model confidence" value={confPct} color="#4da7bd" /></div><div className="result-footer"><span><span className="file-dot" />{result.filename || file?.name}</span><span>Analyzed {lastAnalysis}</span></div></> : <div className="empty-result"><div className="empty-ring"><span>--</span></div><h3>No analysis yet</h3><p>Upload a voice sample above and press <b>Run analysis</b>. Live Flask scores will appear here — no placeholder numbers.</p></div>}</article>
+        </section>
+        <section className="lower-grid"><article className="panel activity-panel"><div className="panel-header"><div><span className="section-kicker">RECENT ACTIVITY</span><h2>Detection history</h2></div><button className="text-button">View all <ArrowUpRight size={15} /></button></div><div className="event-list">{events.length ? events.map((event, index) => <div className="event" key={`${event.time}-${index}`}><div className={`event-icon ${event.level}`}><span /></div><div className="event-copy"><b>{event.label}</b><span>{event.detail}</span></div><time>{event.time}</time></div>) : <p className="empty-note">No detections yet — history from this session will appear here.</p>}</div></article><article className="panel status-panel"><div className="panel-header"><div><span className="section-kicker">PROTECTION LAYER</span><h2>Prevention status</h2></div><ShieldCheck size={20} className="status-shield" /></div><div className="protection-score"><strong>94%</strong><span>policy coverage</span></div><div className="protection-list"><div><span className="status-check"><Check size={13} /></span><span>High-risk calls blocked</span><b>Active</b></div><div><span className="status-check"><Check size={13} /></span><span>Step-up verification</span><b>Active</b></div><div><span className="status-check"><Check size={13} /></span><span>Security alerts</span><b>Active</b></div></div><button className="manage-button">Manage prevention rules <ChevronDown size={16} /></button></article></section>
+        <footer><span>VoiceGuard AI - NEXORA · Flask {API_URL}</span><span>Detection models v2.4.1</span></footer>
+      </div>
     </main>
     <ResourceFooter />
   </div>;
