@@ -6,6 +6,7 @@ numpy
 scipy
 soundfile
 webrtcvad-wheels>=2.0.14
+librosa
 scikit-learn
 httpx
 flask>=3.0
