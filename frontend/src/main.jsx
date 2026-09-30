@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, AlertTriangle, ArrowRight, AudioLines, Check, ChevronDown, Eye, EyeOff, Gauge, LockKeyhole, LogOut, Menu, Play, ShieldCheck, Sparkles, Upload, UserRoundCheck, X } from 'lucide-react';
 import './styles.css';
 import { supabase, supabaseConfigured } from './supabase';
+const SupportPage = lazy(() => import('./support-pages.jsx'));
+const DashboardResourceLinks = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.DashboardResourceLinks })));
+const ResourceFooter = lazy(() => import('./support-pages.jsx').then((module) => ({ default: module.ResourceFooter })));
 
 const steps = [
   { number: '01', title: 'Detect', copy: 'AASIST models inspect every sample for synthetic patterns hidden beneath natural speech.' },
@@ -17,6 +20,16 @@ function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  useEffect(() => {
+    const handleSupportHash = () => {
+      const routes = { '#forgot': '/forgot-password', '#terms': '/terms', '#privacy': '/privacy' };
+      const route = routes[window.location.hash];
+      if (route) window.location.replace(route);
+    };
+    handleSupportHash();
+    window.addEventListener('hashchange', handleSupportHash);
+    return () => window.removeEventListener('hashchange', handleSupportHash);
+  }, []);
   const submitLogin = async (event) => {
     event.preventDefault();
     setStatus({ type: '', message: '' });
@@ -31,7 +44,7 @@ function LoginPage() {
     setStatus({ type: 'success', message: 'Account created. Check your email to confirm your account.' });
   };
   return <div className="login-shell">
-    <div className="login-art"><a className="landing-brand" href="/"><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong><small>by nexora</small></span></a><div className="login-art-copy"><span className="eyebrow">SECURITY OPERATIONS</span><h1>Keep trust<br /><em>in the conversation.</em></h1><p>One secure workspace for every signal, speaker, and decision.</p><div className="login-signal"><div className="login-signal-head"><span><i /> Live protection</span><b>ACTIVE</b></div><Waveform /></div></div><span className="login-art-footer">AI-powered voice security · NEXORA</span></div>
+    <div className="login-art"><a className="landing-brand" href="/"><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong></span></a><div className="login-art-copy"><span className="eyebrow">SECURITY OPERATIONS</span><h1>Keep trust<br /><em>in the conversation.</em></h1><p>One secure workspace for every signal, speaker, and decision.</p><div className="login-signal"><div className="login-signal-head"><span><i /> Live protection</span><b>ACTIVE</b></div><Waveform /></div></div><span className="login-art-footer">AI-powered voice security · NEXORA</span></div>
     <main className="login-panel"><a className="back-home" href="/"><ArrowRight size={14} /> Back to website</a><div className="login-card"><div className="login-icon"><LockKeyhole size={20} /></div><span className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'GET STARTED'}</span><h2>{mode === 'login' ? 'Sign in to VoiceGuard' : 'Create your account'}</h2><p className="login-copy">{mode === 'login' ? 'Access your security console and keep every high-trust interaction protected.' : 'Set up your secure workspace and start protecting high-trust interactions.'}</p>{status.message && <div className={`login-notice ${status.type}`}>{status.message}</div>}<form onSubmit={submitLogin}><label>Email address<input type="email" placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><label>Password<span className="password-field"><input type={showPassword ? 'text' : 'password'} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={6} required /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>{mode === 'login' && <div className="login-options"><label className="remember"><input type="checkbox" /> <span>Remember me</span></label><a href="#forgot">Forgot password?</a></div>}<button className="login-button" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'} {!isSubmitting && <ArrowRight size={16} />}</button></form>{mode === 'login' && <><div className="login-divider"><span>or continue with</span></div><button className="sso-button" type="button" onClick={() => setStatus({ type: 'error', message: 'Google sign-in needs to be enabled in your Supabase dashboard.' })}><span className="sso-mark">G</span> Continue with Google</button></>}<p className="login-help">{mode === 'login' ? 'New to VoiceGuard?' : 'Already have an account?'} <button className="mode-toggle" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setStatus({ type: '', message: '' }); }}>{mode === 'login' ? 'Create an account' : 'Sign in'}</button></p></div><p className="login-legal">By continuing, you agree to VoiceGuard's Terms and Privacy Policy.</p></main>
   </div>;
 }
@@ -80,7 +93,7 @@ function DashboardPage() {
   if (!supabaseConfigured) return <div className="dashboard-loading">Configure Supabase to access the dashboard.</div>;
   if (!session) return null;
   const email = session.user.email || 'Security analyst';
-  return <DashboardWorkspace session={session} signOut={signOut} />;
+  return <div className="dashboard-page-frame"><DashboardWorkspace session={session} signOut={signOut} /><DashboardResourceLinks /></div>;
 }
 
 function Waveform() {
@@ -157,9 +170,12 @@ function SpeakerRegistryPage() {
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeMenu = () => setMenuOpen(false);
+  useEffect(() => {
+    document.querySelectorAll('a[href="http://localhost:5173/console"]').forEach((link) => link.setAttribute('href', '/console'));
+  }, []);
   return <div className="landing-shell">
     <header className="landing-nav">
-      <a className="landing-brand" href="#top" onClick={closeMenu}><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong><small>by nexora</small></span></a>
+      <a className="landing-brand" href="#top" onClick={closeMenu}><span className="brand-mark"><AudioLines size={20} /></span><span><strong>voiceguard</strong></span></a>
       <button className="landing-menu" aria-label="Toggle navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={21} /> : <Menu size={21} />}</button>
       <nav className={menuOpen ? 'landing-links open' : 'landing-links'}><a href="#platform" onClick={closeMenu}>Platform</a><a href="#how-it-works" onClick={closeMenu}>How it works</a><a href="#security" onClick={closeMenu}>Security</a><a className="nav-login" href="http://localhost:5173/console">Sign in <ArrowRight size={14} /></a></nav>
     </header>
@@ -175,8 +191,17 @@ function App() {
 
       <section className="cta-section" id="security"><div><span className="eyebrow">READY WHEN YOU ARE</span><h2>Make every voice<br /><em>verifiable.</em></h2></div><a className="hero-button" href="http://localhost:5173/console">Enter VoiceGuard <ArrowRight size={17} /></a></section>
     </main>
-    <footer className="landing-footer"><a className="landing-brand" href="#top"><span className="brand-mark"><AudioLines size={17} /></span><span><strong>voiceguard</strong><small>by nexora</small></span></a><span>AI-powered voice security for a more trustworthy world.</span><span>© 2026 NEXORA</span></footer>
+    <ResourceFooter />
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(window.location.pathname === '/console' ? <LoginPage /> : window.location.pathname === '/dashboard' ? <DashboardPage /> : <App />);
+const currentPath = window.location.pathname.replace(/\/$/, '') || '/';
+const currentPage = currentPath === '/console' || currentPath === '/login'
+  ? <><LoginPage /><ResourceFooter /></>
+  : currentPath === '/dashboard'
+    ? <DashboardPage />
+    : currentPath === '/'
+        ? <App />
+      : <SupportPage path={currentPath} />;
+
+createRoot(document.getElementById('root')).render(<Suspense fallback={<div className="dashboard-loading">Loading VoiceGuard...</div>}>{currentPage}</Suspense>);
