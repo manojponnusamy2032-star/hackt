@@ -5,6 +5,7 @@ python-multipart>=0.0.9
 numpy
 scipy
 soundfile
+librosa
 scikit-learn
 httpx
 flask>=3.0
