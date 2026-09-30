@@ -7,6 +7,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 
 from deepfake_detection.detector import detect_voice
 
@@ -623,25 +624,10 @@ def calculate_risk(
 # ============================================================
 # HERO
 # ============================================================
-st.markdown(
-    """
-<div class="hero">
-    <div class="hero-copy">
-        <div class="badge">VOICEGUARD / TRUSTED VOICE OPERATIONS</div>
-        <div class="hero-title">YOUR VOICE.<br><span style="color:var(--vg-cyan)">YOUR IDENTITY.</span></div>
-        <div class="hero-subtitle">Real-time authenticity intelligence for synthetic speech, cloned voices, and high-risk identity claims.</div>
-        <div class="small-text">DETECT &nbsp;·&nbsp; VERIFY &nbsp;·&nbsp; ASSESS &nbsp;·&nbsp; RESPOND</div>
-    </div>
-    <div class="hero-core" aria-label="VoiceGuard AI security core">
-        <div class="core-ring outer"></div>
-        <div class="core-ring"></div>
-        <div class="core-shell"></div>
-        <div class="core-label">AI SECURITY CORE</div>
-    </div>
-
-</div>
-""",
-    unsafe_allow_html=True,
+components.html(
+    Path(__file__).with_name("voiceguard_hero.html").read_text(encoding="utf-8"),
+    height=420,
+    scrolling=False,
 )
 
 st.markdown(

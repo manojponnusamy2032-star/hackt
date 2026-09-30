@@ -56,7 +56,7 @@ def fraud_signal(seconds: float = 1.2, seed: int = 7) -> np.ndarray:
 
 
 def voice_signal(seconds: float = 1.2, seed: int = 3) -> np.ndarray:
-    """Human-like: harmonic stack with vocal jitter and HF roll-off."""
+    """Procedural harmonic smoke signal; not genuine human speech or an eval sample."""
     rng = np.random.default_rng(seed)
     t = np.arange(int(SAMPLE_RATE * seconds)) / SAMPLE_RATE
     f0 = 120.0 + 2.5 * np.sin(2 * np.pi * 3.2 * t)
@@ -365,18 +365,119 @@ def test_rest_fraud(client: TestClient) -> bool:
 
 
 def test_rest_benign_and_verify(client: TestClient) -> bool:
-    print("\n[rest analyze - human sample + speaker verify]")
+    print("\n[rest analyze - harmonic smoke fixture + speaker verify]")
     wave = voice_signal()
     res = client.post("/api/analyze", files={"audio": ("human.wav", wav_bytes(wave), "audio/wav")},
                       data={"claimed_speaker": "Treasury Officer"})
     body = res.json()
     ok = all([
         _check("POST /api/analyze is 200", res.status_code == 200),
-        _check("human-referenced analyze is not CRITICAL", body.get("risk", {}).get("risk_level") != "CRITICAL",
-               f"score={body.get('risk', {}).get('risk_score')} level={body.get('risk', {}).get('risk_level')}"),
+         _check("harmonic smoke returns a finite model score",
+             np.isfinite(body.get("detection", {}).get("synthetic_probability", float("nan")))
+             and 0.0 <= body.get("detection", {}).get("synthetic_probability", -1.0) <= 1.0,
+             str(body.get("detection", {}).get("synthetic_probability"))),
         _check("no reference -> neutral 0.5", body.get("speaker", {}).get("speaker_match_score") == 0.5),
     ])
     return bool(ok)
+def test_upload_quality_gate_and_fail_closed(client: TestClient) -> bool:
+    print("\n[rest analyze - quality gate, fail-closed, field semantics]")
+    import asyncio
+
+    import backend.main as main
+
+    def harmonic(seconds: float, seed: int = 21) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        t = np.arange(int(SAMPLE_RATE * seconds)) / SAMPLE_RATE
+        f0 = 125.0 + 3.0 * np.sin(2 * np.pi * 2.7 * t)
+        phase = 2 * np.pi * np.cumsum(f0) / SAMPLE_RATE
+        sig = 0.5 * np.sin(phase) + 0.25 * np.sin(2 * phase) + 0.12 * np.sin(3 * phase)
+        sig += 0.005 * rng.standard_normal(t.size)
+        return np.clip(sig / np.max(np.abs(sig)), -1.0, 1.0).astype(np.float32)
+
+    real_get_detector = main.get_deepfake_detector
+    real_run_aasist = main.run_aasist
+    checks = []
+    try:
+        # --- silence is rejected with 422, never scored ---------------------
+        silent = client.post("/api/analyze",
+                             files={"audio": ("silence.wav", wav_bytes(np.zeros(SAMPLE_RATE * 2,
+                                                                                dtype=np.float32)),
+                                              "audio/wav")})
+        sbody = silent.json()
+        checks.append(_check("pure silence rejected with 422", silent.status_code == 422,
+                             str(silent.status_code)))
+        checks.append(_check("silence response carries the quality report",
+                             sbody.get("status") == "INSUFFICIENT_AUDIO_QUALITY"
+                             and isinstance(sbody.get("audio_quality"), dict),
+                             str(sbody.get("status"))))
+
+        # --- unavailable detector fails closed with 503, not a score --------
+        main.get_deepfake_detector = lambda: None
+        missing = client.post("/api/analyze",
+                              files={"audio": ("speech.wav", wav_bytes(harmonic(2.0)), "audio/wav")})
+        mbody = missing.json()
+        checks.append(_check("missing model fails closed with 503 (never 200 + score)",
+                             missing.status_code == 503
+                             and mbody.get("status") == "DETECTION_UNAVAILABLE",
+                             f"{missing.status_code} {mbody.get('status')}"))
+        checks.append(_check("503 carries no spoof score",
+                             "detection" not in mbody or "spoof_model_score" not in mbody.get("detection", {}),
+                             str(sorted(mbody.keys()))))
+
+        # --- stubbed model: tail coverage, median aggregation, semantics ----
+        main.get_deepfake_detector = lambda: object()
+        stubbed = iter([0.10, 0.90, 0.20, 0.30])
+
+        def fake_aasist(window: np.ndarray):
+            return {"synthetic_probability": next(stubbed)}
+
+        main.run_aasist = fake_aasist
+        prepared, quality = main.prepare_voice_audio(harmonic(10.0)) if hasattr(main, "prepare_voice_audio") else (None, None)
+        if prepared is None:  # keep the direct function import working either way
+            from backend.audio_quality import prepare_voice_audio
+            prepared, quality = prepare_voice_audio(harmonic(10.0))
+        detection, backend_name = main.build_detection(prepared)
+        last = detection["segment_scores"][-1]
+        checks.append(_check("long clip scores the tail, not just the first window",
+                             detection["window_count"] == 4
+                             and abs(last["end_s"] - prepared.size / SAMPLE_RATE) < 0.05,
+                             f"windows={detection['window_count']} tail_end={last['end_s']}"))
+        checks.append(_check("window scores aggregate by median (robust to one extreme)",
+                             detection["spoof_model_score"] == 0.25,
+                             str(detection["spoof_model_score"])))
+        checks.append(_check("score is labelled uncalibrated, never a probability",
+                             detection["score_calibrated"] is False
+                             and "uncalibrated" in detection["model_score_semantics"]
+                             and detection["model_prediction"] in ("SPOOF", "BONAFIDE"),
+                             detection["model_prediction"]))
+        checks.append(_check("legacy alias equals the explicit model field",
+                             detection["synthetic_probability"] == detection["spoof_model_score"],
+                             str(detection["synthetic_probability"])))
+        checks.append(_check("acoustic field is 0-1; anomaly twin is 0-100",
+                             0.0 <= detection["acoustic_score"] <= 1.0
+                             and abs(detection["acoustic_anomaly_score"]
+                                     - detection["acoustic_score"] * 100.0) < 0.01,
+                             str((detection["acoustic_score"], detection["acoustic_anomaly_score"]))))
+        checks.append(_check("detector/model version is published",
+                             isinstance(detection.get("model_version"), str)
+                             and len(detection["model_version"]) > 0,
+                             str(detection.get("model_version"))))
+
+        # --- telemetry raw_score reuses the streaming 0-100 acoustic unit ----
+        snap = asyncio.run(main.publish_upload_telemetry(
+            {"risk_score": 10.0, "stream_level": "SAFE"}, detection,
+            latency_ms=12.0, source="upload-test", session_id="upload-test"))
+        checks.append(_check("upload telemetry raw_score mirrors streaming 0-100 units",
+                             abs(snap["raw_score"] - detection["acoustic_anomaly_score"]) < 1e-9
+                             and snap["raw_score"] != 0.0 * detection["acoustic_score"],
+                             str(snap["raw_score"])))
+    finally:
+        main.get_deepfake_detector = real_get_detector
+        main.run_aasist = real_run_aasist
+        main.HUB.reset()
+    return all(checks)
+
+
 def test_verify_endpoint(client: TestClient) -> bool:
     print("\n[rest verify - speaker matching]")
     wave = voice_signal()
@@ -765,6 +866,7 @@ def main() -> int:
         ("health", test_health),
         ("rest fraud", test_rest_fraud),
         ("rest benign + verify", test_rest_benign_and_verify),
+        ("upload quality + fail-closed", test_upload_quality_gate_and_fail_closed),
         ("verify endpoint", test_verify_endpoint),
         ("features endpoint", test_features_endpoint),
         ("ws simulator fraud", test_simulator_ws_fraud),

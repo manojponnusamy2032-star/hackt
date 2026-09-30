@@ -48,6 +48,7 @@ try:  # package import (uvicorn backend.main:app)
     from .audio_processor import (FEATURE_KEYS, HOP_SAMPLES, OVERLAP, SAMPLE_RATE, WINDOW_MS,
                                   AudioBufferManager, FeatureExtractor, extract_acoustic_features,
                                   mean_features)
+    from .audio_quality import prepare_voice_audio
     from .detection_engine import (DetectionEngine, THRESHOLDS, VOICING_RULES,
                                    calculate_anomaly_score, score_components)
     from .mock_bank_api import (MAX_LOG_ENTRIES as MAX_LOG_CAPACITY, freeze_log_size,
@@ -58,6 +59,7 @@ except ImportError:  # direct script execution (python backend/main.py)
     from audio_processor import (FEATURE_KEYS, HOP_SAMPLES, OVERLAP, SAMPLE_RATE, WINDOW_MS,
                                  AudioBufferManager, FeatureExtractor, extract_acoustic_features,
                                  mean_features)
+    from audio_quality import prepare_voice_audio
     from detection_engine import (DetectionEngine, THRESHOLDS, VOICING_RULES,
                                   calculate_anomaly_score, score_components)
     from mock_bank_api import (MAX_LOG_ENTRIES as MAX_LOG_CAPACITY, freeze_log_size,
@@ -83,6 +85,7 @@ APP_VERSION = "2.1.0"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 UPLOAD_READ_CHUNK = 1024 * 1024
 MAX_WS_FRAME_BYTES = 4 * 1024 * 1024
+MAX_MODEL_WINDOWS = 64
 MIN_WS_FRAME_SAMPLES = 8
 ALLOWED_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm", ".opus", ".aac"}
 ALLOWED_SAMPLE_RATES = {8000, 16000, 22050, 44100, 48000}
@@ -698,9 +701,7 @@ def load_audio_bytes(raw: bytes, filename: str = "upload.wav") -> np.ndarray:
     if audio is None or audio.size == 0:
         raise ValueError("could not decode audio (need wav/flac/ogg, or a working ffmpeg for mp3/m4a/webm)")
     audio = np.nan_to_num(np.asarray(audio, dtype=np.float32), nan=0.0, posinf=0.0, neginf=0.0)
-    peak = float(np.max(np.abs(audio)))
-    if peak > 0:
-        audio = (audio / peak).astype(np.float32)
+    audio -= float(np.mean(audio, dtype=np.float64))
     return np.clip(audio, -1.0, 1.0)
 
 
@@ -785,6 +786,7 @@ def verify_speakers(y_test: np.ndarray, y_ref: np.ndarray) -> Dict[str, Any]:
 # ------------------------------------------------- optional AASIST M2 model
 _DETECTOR: Dict[str, Any] = {"obj": None, "resolved": False, "error": None, "loading": False}
 _DETECTOR_LOCK = threading.Lock()
+_DETECTOR_INFERENCE_LOCK = threading.Lock()
 
 
 def get_deepfake_detector():
@@ -835,10 +837,15 @@ def run_aasist(audio: np.ndarray) -> Optional[Dict[str, float]]:
         import torch
         from deepfake_detection.inference import TARGET_SAMPLES
 
-        arr = np.asarray(audio, dtype=np.float32)
-        arr = np.pad(arr, (0, max(0, TARGET_SAMPLES - arr.size)))[:TARGET_SAMPLES]
-        with torch.no_grad():
-            out = detector.predict(torch.tensor(arr, dtype=torch.float32).unsqueeze(0))
+        arr = np.asarray(audio, dtype=np.float32).reshape(-1)
+        if arr.size == 0:
+            return None
+        if arr.size < TARGET_SAMPLES:
+            arr = np.tile(arr, (TARGET_SAMPLES + arr.size - 1) // arr.size)[:TARGET_SAMPLES]
+        else:
+            arr = arr[:TARGET_SAMPLES]
+        with _DETECTOR_INFERENCE_LOCK, torch.inference_mode():
+            out = detector.predict(torch.from_numpy(arr.copy()).unsqueeze(0))
         if not isinstance(out, dict) or "synthetic_probability" not in out:
             return None
         return {k: float(v) for k, v in out.items() if isinstance(v, (int, float))}
@@ -848,29 +855,84 @@ def run_aasist(audio: np.ndarray) -> Optional[Dict[str, float]]:
         return None
 # ------------------------------------------------------------------- fusion
 def build_detection(audio: np.ndarray) -> Tuple[Dict[str, Any], str]:
-    """Acoustic anomaly + optional AASIST fusion -> detection payload + backend tag."""
-    features, anomaly = score_waveform(audio)
-    aasist = run_aasist(audio)
-    acoustic_prob = float(np.clip(anomaly / 100.0, 0.0, 1.0))
-    if aasist is not None:
-        synthetic = float(np.clip(0.75 * aasist.get("synthetic_probability", acoustic_prob)
-                                  + 0.25 * acoustic_prob, 0.0, 1.0))
-        backend = "aasist + acoustic-fusion"
-    else:
-        synthetic = acoustic_prob
-        backend = "acoustic-heuristic (aasist unavailable)"
+    """Score overlapping fixed-context AASIST windows across the prepared clip.
+
+    AASIST softmax is exposed as an uncalibrated model score. Acoustic features
+    remain separate supporting evidence and are not blended into that score.
+    """
+    from deepfake_detection.inference import TARGET_SAMPLES
+    from deepfake_detection.windowing import aggregate_window_scores, make_model_windows
+
+    detector = get_deepfake_detector()
+    if detector is None:
+        return {"status": "DETECTION_UNAVAILABLE", "aasist_used": False}, "unavailable"
+
+    waveform = np.asarray(audio, dtype=np.float32).reshape(-1)
+    windows = make_model_windows(
+        waveform,
+        target_samples=TARGET_SAMPLES,
+        stride_samples=TARGET_SAMPLES // 2,
+        max_windows=MAX_MODEL_WINDOWS,
+    )
+    if not windows:
+        return {"status": "DETECTION_UNAVAILABLE", "aasist_used": False}, "unavailable"
+
+    model_scores: List[float] = []
+    acoustic_scores: List[float] = []
+    segment_scores: List[Dict[str, Any]] = []
+    feature_frames: List[Dict[str, float]] = []
+    inference_started = time.perf_counter()
+    for start_sample, window in windows:
+        output = run_aasist(window)
+        if output is None:
+            return {"status": "DETECTION_UNAVAILABLE", "aasist_used": False}, "unavailable"
+        model_score = float(np.clip(output["synthetic_probability"], 0.0, 1.0))
+        features, anomaly = score_waveform(window)
+        acoustic_score = float(np.clip(anomaly / 100.0, 0.0, 1.0))
+        model_scores.append(model_score)
+        acoustic_scores.append(acoustic_score)
+        feature_frames.append(features)
+        segment_scores.append({
+            "start_s": round(start_sample / SAMPLE_RATE, 3),
+            "end_s": round(min(start_sample + TARGET_SAMPLES, waveform.size) / SAMPLE_RATE, 3),
+            "spoof_model_score": round(model_score, 6),
+            "acoustic_score": round(acoustic_score, 6),
+        })
+
+    spoof_score = aggregate_window_scores(model_scores)
+    acoustic_score = aggregate_window_scores(acoustic_scores)
+    aggregate_features = mean_features(feature_frames)
+    inference_ms = round((time.perf_counter() - inference_started) * 1000.0, 2)
+    model_prediction = "SPOOF" if spoof_score >= 0.5 else "BONAFIDE"
     detection = {
-        "synthetic_probability": round(synthetic, 4),
-        "authentic_probability": round(1.0 - synthetic, 4),
-        "model_confidence": round(max(synthetic, 1.0 - synthetic), 4),
-        "class_0_probability": round(synthetic, 4),
-        "class_1_probability": round(1.0 - synthetic, 4),
-        "anomaly_score": anomaly,
-        "acoustic_features": features,
-        "band_scores": score_components(features),
-        "aasist_used": aasist is not None,
+        "status": "scored",
+        "model_name": "AASIST",
+        "model_version": getattr(detector, "model_version", "local-checkpoint-unversioned"),
+        "spoof_model_score": round(spoof_score, 6),
+        "model_score_semantics": "AASIST class-0 softmax score; uncalibrated, not a probability of real-world error",
+        "model_prediction": model_prediction,
+        "score_calibrated": False,
+        "aggregation": "median of overlapping AASIST windows",
+        "window_count": len(segment_scores),
+        "window_stride_s": round((TARGET_SAMPLES // 2) / SAMPLE_RATE, 4),
+        "windows_capped": len(segment_scores) >= MAX_MODEL_WINDOWS,
+        "segment_scores": segment_scores,
+        "inference_latency_ms": inference_ms,
+        # 0-1 acoustic heuristic anomaly, reported separately from the model score.
+        "acoustic_score": round(acoustic_score, 6),
+        # Same value on the 0-100 scale used by the streaming RiskScorer and by the
+        # telemetry `raw_score` field. Published explicitly so the two scales can
+        # never be silently mixed again.
+        "acoustic_anomaly_score": round(acoustic_score * 100.0, 2),
+        "acoustic_features": aggregate_features,
+        "band_scores": score_components(aggregate_features),
+        "aasist_used": True,
+        # Compatibility aliases. These remain uncalibrated model scores.
+        "synthetic_probability": round(spoof_score, 6),
+        "authentic_probability": round(1.0 - spoof_score, 6),
+        "model_confidence": round(max(spoof_score, 1.0 - spoof_score), 6),
     }
-    return detection, backend
+    return detection, "aasist-sliding-window"
 
 
 def combine_risk(synthetic_probability: float, speaker_match_score: float) -> Dict[str, Any]:
@@ -907,11 +969,18 @@ async def publish_upload_telemetry(risk: Dict[str, Any], detection: Dict[str, An
         bank_status = "FROZEN"
         freeze_count = max(freeze_count, freeze_log_size())
         critical_events += 1
+    # `raw_score` shares the streaming convention: the 0-100 acoustic anomaly
+    # score, not the 0-1 uncalibrated AASIST softmax. build_detection used to
+    # publish this as "anomaly_score" and then stopped, which silently sent
+    # raw_score=0 for every upload while the live mic path reported real values.
+    raw_anomaly = detection.get("acoustic_anomaly_score")
+    if raw_anomaly is None:                       # pre-0-100 / defensive fallback
+        raw_anomaly = float(detection.get("acoustic_score", 0.0)) * 100.0
     HUB.publish(
         session_id=session_id,
         source=source,
         risk_score=float(risk["risk_score"]),
-        raw_score=float(detection.get("anomaly_score", 0.0)),
+        raw_score=float(raw_anomaly),
         level=risk.get("stream_level", classify_risk(risk["risk_score"])),
         features=detection.get("acoustic_features", {}),
         band_scores=detection.get("band_scores", {}),
@@ -1059,21 +1128,46 @@ async def analyze(
     waveform = await read_upload(audio, "audio")
     if waveform.size < SAMPLE_RATE // 4:
         raise HTTPException(status_code=400, detail="audio too short (minimum ~0.25s)")
+    prepared_audio, audio_quality = await asyncio.to_thread(prepare_voice_audio, waveform, SAMPLE_RATE)
+    if audio_quality["insufficient_audio_quality"]:
+        return JSONResponse(status_code=422, content={
+            "status": "INSUFFICIENT_AUDIO_QUALITY",
+            "message": "Not enough usable speech or the recording is clipped. Record at least 0.5 seconds of clear speech and try again.",
+            "audio_quality": audio_quality,
+        })
 
-    # Decoding + AASIST + framing are CPU-bound: run them in a worker thread so
+    # Decoding + VAD + AASIST window inference are CPU-bound: run them in a worker thread so
     # the /ws/dashboard telemetry keeps flowing while an upload is analysed.
-    detection, backend = await asyncio.to_thread(build_detection, waveform)
+    detection, backend = await asyncio.to_thread(build_detection, prepared_audio)
+    if detection.get("status") == "DETECTION_UNAVAILABLE":
+        detector = detector_state()
+        return JSONResponse(status_code=503, content={
+            "status": "DETECTION_UNAVAILABLE",
+            "message": "The AASIST detector is unavailable; this upload was not classified.",
+            "detector": detector,
+            "audio_quality": audio_quality,
+        })
 
     if reference is not None and reference.filename:
         ref_wave = await read_upload(reference, "reference")
-        speaker = await asyncio.to_thread(verify_speakers, waveform, ref_wave)
+        prepared_reference, reference_quality = await asyncio.to_thread(prepare_voice_audio, ref_wave, SAMPLE_RATE)
+        if reference_quality["insufficient_audio_quality"]:
+            return JSONResponse(status_code=422, content={
+                "status": "INSUFFICIENT_REFERENCE_QUALITY",
+                "message": "The reference recording needs at least 0.5 seconds of clear, unclipped speech.",
+                "audio_quality": audio_quality,
+                "reference_quality": reference_quality,
+            })
+        speaker = await asyncio.to_thread(verify_speakers, prepared_audio, prepared_reference)
         speaker["note"] = "MFCC cosine similarity vs reference voice"
     else:
         speaker = {"speaker_match_score": 0.5, "cosine_similarity": 0.0, "speaker_verified": False,
                    "threshold": 0.75, "note": "no reference provided; neutral 0.5 used"}
     speaker["claimed_identity"] = (claimed_speaker or "unknown").strip() or "unknown"
 
-    risk = combine_risk(detection["synthetic_probability"], speaker["speaker_match_score"])
+    # Feed risk from the explicit model field rather than the compatibility alias,
+    # so the fusion input is unambiguous about being the uncalibrated AASIST score.
+    risk = combine_risk(detection["spoof_model_score"], speaker["speaker_match_score"])
     action = prevention_action(risk["stream_level"])
     freeze = await publish_upload_telemetry(risk, detection, (time.perf_counter() - started) * 1000.0,
                                             source="upload", session_id=session_id)
@@ -1084,6 +1178,7 @@ async def analyze(
         "filename": audio.filename or "sample.wav",
         "duration_s": round(waveform.size / SAMPLE_RATE, 2),
         "deepfake_backend": backend,
+        "audio_quality": audio_quality,
         "detection": detection,
         "speaker": speaker,
         "risk": risk,

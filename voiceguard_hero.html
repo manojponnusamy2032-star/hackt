@@ -1,0 +1,148 @@
+<meta charset="utf-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+.showcase {
+    position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: center; gap: 20px; height: 390px; overflow: hidden; padding: 36px 42px;
+    color: #f4f7f6; background: radial-gradient(ellipse at 78% 48%, rgba(99, 143, 145, .15), transparent 36%),
+    linear-gradient(120deg, #0b1117 0%, #111c23 56%, #10181e 100%);
+    border: 1px solid rgba(174, 205, 201, .25); box-shadow: 0 24px 75px rgba(0,0,0,.24), inset 0 0 70px rgba(174,205,201,.025);
+}
+.showcase:before {
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .34;
+    background: linear-gradient(rgba(190,218,213,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(190,218,213,.045) 1px, transparent 1px);
+    background-size: 42px 42px; mask-image: linear-gradient(90deg, #000, transparent 88%);
+}
+.copy { position: relative; z-index: 2; max-width: 700px; }
+.eyebrow, .descriptor, .scene-status { font: 500 10px 'DM Mono', monospace; letter-spacing: .14em; text-transform: uppercase; }
+.eyebrow { display: flex; align-items: center; gap: 10px; color: #9fb8b5; }
+.eyebrow:before { content: ''; width: 22px; height: 1px; background: #d0b27b; }
+h1 { margin: 22px 0 14px; max-width: 680px; font: 700 56px/.98 'Manrope', sans-serif; letter-spacing: 0; }
+h1 span { color: #b9d2ce; }
+.summary { max-width: 580px; color: #a9b6b7; font: 400 16px/1.55 'Manrope', sans-serif; }
+.descriptor { margin-top: 24px; color: #d0b27b; font-size: 9px; }
+.scene { position: relative; width: 340px; height: 320px; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fallback {
+    display: none; position: absolute; width: 150px; height: 150px; left: 95px; top: 72px;
+    border: 1px solid rgba(185,210,206,.7); border-radius: 50%;
+    background: radial-gradient(circle at 34% 28%, rgba(255,255,255,.8), rgba(185,210,206,.35) 12%, rgba(20,36,40,.9) 60%);
+    box-shadow: 0 0 54px rgba(185,210,206,.2), inset -18px -12px 24px rgba(208,178,123,.2);
+}
+.fallback:before, .fallback:after {
+    content: ''; position: absolute; inset: -22px 8px; border: 1px solid rgba(208,178,123,.65);
+    border-radius: 50%; transform: rotateX(68deg) rotateZ(24deg);
+}
+.fallback:after { inset: -36px 22px; border-color: rgba(185,210,206,.45); transform: rotateY(68deg) rotateZ(-25deg); }
+.scene-label { position: absolute; z-index: 1; right: 0; top: 13px; color: #9fb8b5; font: 500 9px 'DM Mono', monospace; letter-spacing: .11em; }
+.scene-status { position: absolute; z-index: 1; right: 0; bottom: 8px; display: flex; align-items: center; gap: 8px; color: #c5d1cc; font-size: 9px; letter-spacing: .1em; }
+.scene-status:before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #b8d978; box-shadow: 0 0 10px #b8d978; }
+@media (max-width: 680px) {
+    .showcase { display: block; height: 420px; padding: 28px 24px; }
+    .copy { max-width: 100%; }
+    h1 { margin-top: 18px; font-size: 42px; }
+    .summary { max-width: 92%; font-size: 14px; }
+    .descriptor { margin-top: 16px; font-size: 8px; }
+    .scene { position: absolute; width: 220px; height: 210px; right: -10px; bottom: -18px; opacity: .72; }
+    .scene-label, .scene-status { right: 18px; }
+    .scene-label { top: auto; bottom: 202px; }
+    .fallback { width: 112px; height: 112px; left: 54px; top: 50px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *:before, *:after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+</style>
+<section class="showcase" aria-label="VoiceGuard voice authenticity operations">
+    <div class="copy">
+        <div class="eyebrow">VoiceGuard / trusted voice operations</div>
+        <h1>YOUR VOICE.<br><span>YOUR IDENTITY.</span></h1>
+        <div class="summary">Real-time authenticity intelligence for synthetic speech, cloned voices, and high-risk identity claims.</div>
+        <div class="descriptor">Detect &nbsp;·&nbsp; Verify &nbsp;·&nbsp; Assess &nbsp;·&nbsp; Respond</div>
+    </div>
+    <div class="scene" aria-label="Interactive reflective 3D security object">
+        <div class="scene-label">VOICE AUTHENTICITY / 01</div>
+        <canvas id="voiceguard-scene" aria-hidden="true"></canvas>
+        <div class="fallback" aria-hidden="true"></div>
+        <div class="scene-status">SYSTEM READY</div>
+    </div>
+</section>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+try {
+    const THREE = await import('three');
+    const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+    const canvas = document.querySelector('#voiceguard-scene');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+    camera.position.set(0, 0, 4.7);
+
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+
+    const object = new THREE.Mesh(
+        new THREE.TorusKnotGeometry(0.86, 0.235, 220, 32, 2, 3),
+        new THREE.MeshPhysicalMaterial({ color: 0xb7c6c2, metalness: 0.92, roughness: 0.17, clearcoat: 0.8, clearcoatRoughness: 0.12, envMapIntensity: 1.35 })
+    );
+    scene.add(object);
+    scene.add(new THREE.HemisphereLight(0xd9edec, 0x192126, 1.3));
+    const key = new THREE.DirectionalLight(0xffffff, 3.4);
+    key.position.set(-3, 4, 5);
+    scene.add(key);
+    const warm = new THREE.PointLight(0xd0b27b, 18, 8);
+    warm.position.set(3, -1, 2);
+    scene.add(warm);
+
+    const orbit = new THREE.Mesh(
+        new THREE.TorusGeometry(1.4, 0.006, 8, 180),
+        new THREE.MeshBasicMaterial({ color: 0x86aaa7, transparent: true, opacity: 0.55 })
+    );
+    orbit.rotation.set(1.08, 0.2, -0.34);
+    scene.add(orbit);
+
+    let targetX = 0;
+    let targetY = 0;
+    let visible = true;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const resize = () => {
+        const bounds = canvas.parentElement.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        renderer.setSize(bounds.width, bounds.height, false);
+        camera.aspect = bounds.width / bounds.height;
+        camera.updateProjectionMatrix();
+    };
+    new ResizeObserver(resize).observe(canvas.parentElement);
+    resize();
+    canvas.parentElement.addEventListener('pointermove', event => {
+        const bounds = canvas.parentElement.getBoundingClientRect();
+        targetY = ((event.clientX - bounds.left) / bounds.width - 0.5) * 0.5;
+        targetX = ((event.clientY - bounds.top) / bounds.height - 0.5) * 0.32;
+    });
+    canvas.parentElement.addEventListener('pointerleave', () => { targetX = 0; targetY = 0; });
+    new IntersectionObserver(entries => { visible = entries[0].isIntersecting; }).observe(canvas);
+
+    const clock = new THREE.Clock();
+    const animate = () => {
+        requestAnimationFrame(animate);
+        if (!visible) return;
+        const time = clock.getElapsedTime();
+        object.rotation.x += (targetX - object.rotation.x) * 0.025;
+        object.rotation.y += ((reducedMotion ? 0 : time * 0.12) + targetY - object.rotation.y) * 0.025;
+        orbit.rotation.z = reducedMotion ? -0.34 : -0.34 + time * 0.035;
+        renderer.render(scene, camera);
+    };
+    animate();
+} catch (error) {
+    document.querySelector('#voiceguard-scene').style.display = 'none';
+    document.querySelector('.fallback').style.display = 'block';
+}
+</script>
